@@ -18,10 +18,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static com.faifly.demo.util.Constants.DATETIME_FORMAT;
 
@@ -56,45 +53,39 @@ public class VisitUtil {
     }
 
 
-    public VisitsResponseDto createVisitsResponseDto(List<Visit> visits) {
+    public VisitsResponseDto getPatientsWithLatestVisits(Pageable pageable, String search, List<Long> doctorIds) {
+        Page<PatientVisitDoctorStatsDto> resultsPage = visitService.findPatientsWithLatestVisitsAndDoctorStats(search, doctorIds, pageable);
+        List<PatientVisitDoctorStatsDto> statsDtos = resultsPage.getContent();
+
+        if (statsDtos.isEmpty()) {
+            return new VisitsResponseDto(Collections.emptyList(), 0);
+        }
+
         Map<Long, PatientWithVisitsDto> patientsMap = new LinkedHashMap<>();
 
-        Map<Long, Integer> countPastPatientsByDoctorId = visitService.countPastPatientsByDoctorId(visits
-                .stream().map(v -> v.getDoctor().getId()).toList());
-
-        for (Visit v : visits) {
-            var patient = v.getPatient();
-            var doctor = v.getDoctor();
-            int doctorsPatients = countPastPatientsByDoctorId.getOrDefault(doctor.getId(), 0);
-
+        for (PatientVisitDoctorStatsDto dto : statsDtos) {
             DoctorDto doctorDto = new DoctorDto(
-                    doctor.getFirstName(),
-                    doctor.getLastName(),
-                    doctorsPatients
+                    dto.doctorFirstName(),
+                    dto.doctorLastName(),
+                    dto.doctorsTotalPatientsCount()
             );
 
             VisitDto visitDto = new VisitDto(
-                    v.getStart(),
-                    v.getEnd(),
+                    dto.visitStart(),
+                    dto.visitEnd(),
                     doctorDto
             );
 
-            patientsMap.computeIfAbsent(patient.getId(), _ ->
+            patientsMap.computeIfAbsent(dto.patientId(), _ ->
                     new PatientWithVisitsDto(
-                            patient.getFirstName(),
-                            patient.getLastName(),
+                            dto.patientFirstName(),
+                            dto.patientLastName(),
                             new ArrayList<>()
                     )
             ).lastVisits().add(visitDto);
         }
 
         return new VisitsResponseDto(new ArrayList<>(patientsMap.values()), patientsMap.size());
-    }
-
-    public VisitsResponseDto getPatientsWithVisits(Pageable pageable, String search, List<Long> doctorIds) {
-        Page<Patient> patients = patientService.findAll(search, pageable);
-        List<Visit> visits = visitService.findByPatientsAndDoctors(patients.getContent(), doctorIds);
-        return createVisitsResponseDto(visits);
     }
 
 }

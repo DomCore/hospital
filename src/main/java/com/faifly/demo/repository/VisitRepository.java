@@ -1,8 +1,9 @@
 package com.faifly.demo.repository;
 
-import com.faifly.demo.model.Patient;
+import com.faifly.demo.dao.PatientVisitDoctorStatsDto;
 import com.faifly.demo.model.Visit;
-import com.faifly.demo.repository.projection.DoctorPatientCount;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -20,20 +21,35 @@ public interface VisitRepository extends JpaRepository<Visit, Long> {
                                    @Param("end") ZonedDateTime end);
 
     @Query("""
-                SELECT v.doctor.id AS doctorId,
-                       COUNT(DISTINCT v.patient.id) AS totalPatients
-                FROM visits v
-                WHERE (:doctorIds IS NULL OR v.doctor.id IN :doctorIds)
-                  AND v.end <= CURRENT_TIMESTAMP
-                GROUP BY v.doctor.id
-            """)
-    List<DoctorPatientCount> countPastPatientsForAllDoctors(@Param("doctorIds") List<Long> doctorIds);
-
-    @Query("SELECT v FROM visits v " +
-            "JOIN FETCH v.patient p " +
-            "JOIN FETCH v.doctor d " +
-            "WHERE v.patient IN :patients " +
-            "AND (:doctorIds IS NULL OR v.doctor.id IN :doctorIds)")
-    List<Visit> findByPatientsAndDoctors(@Param("patients") List<Patient> patients,
-                                         @Param("doctorIds") List<Long> doctorIds);
+        SELECT new com.faifly.demo.dao.PatientVisitDoctorStatsDto(
+            p.id,
+            p.firstName,
+            p.lastName,
+            v.start,
+            v.end,
+            d.id,
+            d.firstName,
+            d.lastName,
+            CAST((SELECT COUNT(DISTINCT sv.patient.id)
+                  FROM visits sv
+                  WHERE sv.doctor.id = d.id AND sv.end <= CURRENT_TIMESTAMP) AS integer)
+        )
+        FROM visits v
+        JOIN v.patient p
+        JOIN v.doctor d
+        WHERE v.end = (
+            SELECT MAX(v2.end)
+            FROM visits v2
+            WHERE v2.patient = p AND v2.doctor = d
+        )
+        AND (:doctorIds IS NULL OR d.id IN :doctorIds)
+        AND (:search IS NULL OR LOWER(p.firstName) LIKE LOWER(CONCAT('%', TRIM(:search), '%'))
+               OR LOWER(p.lastName) LIKE LOWER(CONCAT('%', TRIM(:search), '%')))
+        ORDER BY p.lastName, p.firstName, d.lastName, d.firstName, v.end DESC
+        """)
+    Page<PatientVisitDoctorStatsDto> findPatientsWithLatestVisitsAndDoctorStats(
+            @Param("search") String search,
+            @Param("doctorIds") List<Long> doctorIds,
+            Pageable pageable
+    );
 }

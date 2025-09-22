@@ -1,5 +1,7 @@
 package com.faifly.demo;
 
+import com.faifly.demo.dao.PatientVisitDoctorStatsDto;
+import com.faifly.demo.dao.PatientWithVisitsDto;
 import com.faifly.demo.dao.VisitRequest;
 import com.faifly.demo.dao.VisitsResponseDto;
 import com.faifly.demo.exception.VisitNotCreatedException;
@@ -18,13 +20,11 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import java.time.ZonedDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.TimeZone;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -46,6 +46,7 @@ class VisitUtilTest {
     private Doctor doctor;
     private Patient patient;
     private AutoCloseable openMocks;
+    private Pageable pageable;
 
     @BeforeEach
     void setUp() {
@@ -61,6 +62,7 @@ class VisitUtilTest {
         patient.setId(1L);
         patient.setFirstName("Alice");
         patient.setLastName("Smith");
+        pageable = PageRequest.of(0, 10);
     }
 
     @AfterEach
@@ -118,39 +120,84 @@ class VisitUtilTest {
     }
 
     @Test
-    void createVisitsResponseDto_returnsCorrectStructure() {
-        Visit visit = new Visit(
-                ZonedDateTime.parse("2025-09-17T10:00:00Z"),
-                ZonedDateTime.parse("2025-09-17T11:00:00Z"),
-                patient,
-                doctor
+    void getPatientsWithLatestVisits_shouldReturnFormattedData_whenVisitsExist() {
+        String search = "Alice";
+        List<Long> doctorIds = Arrays.asList(101L, 102L);
+
+        ZonedDateTime visit1Start = ZonedDateTime.parse("2025-09-10T10:00:00Z");
+        ZonedDateTime visit1End = ZonedDateTime.parse("2025-09-10T10:30:00Z");
+        ZonedDateTime visit2Start = ZonedDateTime.parse("2025-09-17T10:00:00Z");
+        ZonedDateTime visit2End = ZonedDateTime.parse("2025-09-17T10:30:00Z");
+        ZonedDateTime visit3Start = ZonedDateTime.parse("2025-09-18T11:00:00Z");
+        ZonedDateTime visit3End = ZonedDateTime.parse("2025-09-18T11:30:00Z");
+        ZonedDateTime visit4Start = ZonedDateTime.parse("2025-09-10T11:00:00Z");
+        ZonedDateTime visit4End = ZonedDateTime.parse("2025-09-10T11:20:00Z");
+
+        List<PatientVisitDoctorStatsDto> mockStats = Arrays.asList(
+                new PatientVisitDoctorStatsDto(
+                        1L, "Alice", "Smith",
+                        visit1Start, visit1End,
+                        101L, "Ethan", "Hughes", 3),
+                new PatientVisitDoctorStatsDto(
+                        1L, "Alice", "Smith",
+                        visit2Start, visit2End,
+                        102L, "Elijah", "Nelson", 1),
+                new PatientVisitDoctorStatsDto(
+                        2L, "Bob", "Johnson",
+                        visit3Start, visit3End,
+                        103L, "Charlotte", "Carter", 1),
+                new PatientVisitDoctorStatsDto(
+                        2L, "Bob", "Johnson",
+                        visit4Start, visit4End,
+                        104L, "Sophia", "Lewis", 3)
         );
+        Page<PatientVisitDoctorStatsDto> mockPage = new PageImpl<>(mockStats, pageable, mockStats.size());
 
-        when(visitService.countPastPatientsByDoctorId(anyList()))
-                .thenReturn(Map.of(1L, 1));
+        when(visitService.findPatientsWithLatestVisitsAndDoctorStats(search, doctorIds, pageable))
+                .thenReturn(mockPage);
 
-        VisitsResponseDto dto = visitUtil.createVisitsResponseDto(List.of(visit));
+        VisitsResponseDto response = visitUtil.getPatientsWithLatestVisits(pageable, search, doctorIds);
 
-        assertNotNull(dto);
-        assertEquals(1, dto.count());
-        assertEquals("Alice", dto.data().getFirst().firstName());
-        assertEquals(1, dto.data().getFirst().lastVisits().size());
-        assertEquals("John", dto.data().getFirst().lastVisits().getFirst().doctor().firstName());
-        assertEquals(1, dto.data().getFirst().lastVisits().getFirst().doctor().totalPatients());
+        assertEquals(2, response.count());
+        assertEquals(2, response.data().size());
+
+        PatientWithVisitsDto alice = response.data().stream()
+                .filter(p -> "Alice".equals(p.firstName()) && "Smith".equals(p.lastName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Alice Smith not found"));
+
+        assertEquals(2, alice.lastVisits().size());
+        assertTrue(alice.lastVisits().stream()
+                .anyMatch(v -> v.doctor().firstName().equals("Ethan") && v.doctor().totalPatients() == 3 && v.start().equals(visit1Start)));
+        assertTrue(alice.lastVisits().stream()
+                .anyMatch(v -> v.doctor().firstName().equals("Elijah") && v.doctor().totalPatients() == 1 && v.start().equals(visit2Start)));
+
+
+        PatientWithVisitsDto bob = response.data().stream()
+                .filter(p -> "Bob".equals(p.firstName()) && "Johnson".equals(p.lastName()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Bob Johnson not found"));
+
+        assertEquals(2, bob.lastVisits().size());
+        assertTrue(bob.lastVisits().stream()
+                .anyMatch(v -> v.doctor().firstName().equals("Charlotte") && v.doctor().totalPatients() == 1 && v.start().equals(visit3Start)));
+        assertTrue(bob.lastVisits().stream()
+                .anyMatch(v -> v.doctor().firstName().equals("Sophia") && v.doctor().totalPatients() == 3 && v.start().equals(visit4Start)));
     }
 
     @Test
-    void getPatientsWithVisits_invokesServices() {
-        Page<Patient> page = new PageImpl<>(List.of(patient));
-        when(patientService.findAll(anyString(), any(Pageable.class))).thenReturn(page);
-        when(visitService.findByPatientsAndDoctors(anyList(), anyList())).thenReturn(List.of(
-                new Visit(ZonedDateTime.now(), ZonedDateTime.now().plusHours(1), patient, doctor)
-        ));
-        when(visitService.countPastPatientsByDoctorId(anyList())).thenReturn(Map.of(1L, 1));
+    void getPatientsWithLatestVisits_shouldReturnEmptyResponse_whenNoVisitsExist() {
+        String search = "NonExistent";
+        List<Long> doctorIds = Collections.emptyList();
+        Page<PatientVisitDoctorStatsDto> emptyPage = Page.empty(pageable);
 
-        VisitsResponseDto dto = visitUtil.getPatientsWithVisits(Pageable.unpaged(), "", List.of(1L));
+        when(visitService.findPatientsWithLatestVisitsAndDoctorStats(search, doctorIds, pageable))
+                .thenReturn(emptyPage);
 
-        assertNotNull(dto);
-        assertEquals(1, dto.count());
+        VisitsResponseDto response = visitUtil.getPatientsWithLatestVisits(pageable, search, doctorIds);
+
+        assertTrue(response.data().isEmpty());
+        assertEquals(0, response.count());
     }
+
 }

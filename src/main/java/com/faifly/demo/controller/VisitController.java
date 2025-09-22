@@ -3,7 +3,6 @@ package com.faifly.demo.controller;
 import com.faifly.demo.dao.VisitRequest;
 import com.faifly.demo.dao.VisitsResponseDto;
 import com.faifly.demo.model.Visit;
-import com.faifly.demo.service.PatientService;
 import com.faifly.demo.service.VisitService;
 import com.faifly.demo.util.VisitUtil;
 import jakarta.validation.Valid;
@@ -34,7 +33,7 @@ public class VisitController {
                                                          @RequestParam(required = false) String search,
                                                          @RequestParam(required = false) List<Long> doctorIds) {
         Pageable pageable = PageRequest.of(page, size);
-        VisitsResponseDto response = visitUtil.getPatientsWithVisits(pageable, search, doctorIds);
+        VisitsResponseDto response = visitUtil.getPatientsWithLatestVisits(pageable, search, doctorIds);
         return ResponseEntity.ok(response);
     }
 
